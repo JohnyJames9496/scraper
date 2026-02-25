@@ -3,7 +3,7 @@ import re
 from sqlalchemy.orm import Session
 from app.database import models
 from app.utils.filters import is_software_job
-from app.services.job_service import bulk_save_jobs, get_existing_links
+from app.services.jobs_service import bulk_save_jobs, get_existing_links
 from app.core.browser import get_browser
 
 USER_AGENTS = [
