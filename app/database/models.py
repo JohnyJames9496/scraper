@@ -2,8 +2,8 @@ from sqlalchemy import Column, String, Integer, DateTime
 from datetime import datetime
 from app.database.database import Base
 
-class Internship(Base):
-    __tablename__ = "internships"
+class Internshipss(Base):
+    __tablename__ = "internshipss"
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200))
