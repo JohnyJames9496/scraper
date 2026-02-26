@@ -40,7 +40,7 @@ def save_job(db: Session, data: dict, keyword: str):
         keyword=keyword,
         location=data.get("location", "Remote")[:100],
         duration=data.get("duration", "Flexible")[:50],
-        stipend=data.get("stipend", "Unpaid")[:100],
+        stipend=data.get("stipend", "Hidden")[:100],
         skills=data.get("skills", "N/A")[:200],
         scraped_date=date.today(),
     )
@@ -64,6 +64,7 @@ async def create_stealth_page(context):
 async def scrape_internshala(keyword: str, db: Session, limit: int = 8):
 
     async with async_playwright() as p:
+
         browser = await p.chromium.launch(
             headless=True,
             args=BROWSER_ARGS
@@ -77,12 +78,13 @@ async def scrape_internshala(keyword: str, db: Session, limit: int = 8):
 
         try:
             url = f"https://internshala.com/internships/keywords-{keyword.replace(' ', '-')}"
-            await page.goto(url, timeout=30000)
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
             await page.wait_for_selector(".individual_internship", timeout=15000)
 
             cards = await page.query_selector_all(".individual_internship")
 
-        except Exception:
+        except Exception as e:
+            print("Page load failed:", e)
             await browser.close()
             return 0
 
@@ -93,25 +95,66 @@ async def scrape_internshala(keyword: str, db: Session, limit: int = 8):
                 break
 
             try:
-                title = await (await card.query_selector("h3")).inner_text()
-                href = await card.get_attribute("data-href")
+                # Title
+                title_el = await card.query_selector("h3")
+                if not title_el:
+                    continue
+                title = await title_el.inner_text()
 
+                # Link
+                href = await card.get_attribute("data-href")
                 if not href:
                     continue
-
                 link = f"https://internshala.com{href}"
+
+                # Company
                 company_el = await card.query_selector(".company_name")
                 company = await company_el.inner_text() if company_el else "Unknown"
+
+                # Full card text (used for regex)
+                full_text = await card.inner_text()
+
+                # 💰 Stipend extraction
+                stipend_match = re.search(
+                    r"(₹\s?[\d,]+(\s?-\s?[\d,]+)?(?:\s?/\s?\w+)?|Unpaid|Performance Based)",
+                    full_text,
+                    re.IGNORECASE
+                )
+                stipend = stipend_match.group(0).strip() if stipend_match else "Hidden"
+
+                # ⏳ Duration extraction
+                duration_match = re.search(
+                    r"(\d+\s?(?:Month|Week)s?)",
+                    full_text,
+                    re.IGNORECASE
+                )
+                duration = duration_match.group(0).strip() if duration_match else "Flexible"
+
+                # 📍 Location extraction
+                location_el = await card.query_selector(".location_link")
+                location = await location_el.inner_text() if location_el else "Remote"
+
+                # 🛠 Skills extraction
+                skills_el = await card.query_selector(".job_skills")
+                skills = "N/A"
+
+                if skills_el:
+                    raw_skills = await skills_el.inner_text()
+                    skills = ", ".join([
+                        s.strip()
+                        for s in raw_skills.replace("\n", ",").split(',')
+                        if s.strip()
+                    ])
 
                 job_data = {
                     "title": title.strip(),
                     "company": company.strip(),
                     "link": link,
                     "source": "Internshala",
-                    "location": "Remote",
-                    "duration": "Flexible",
-                    "stipend": "Hidden",
-                    "skills": "N/A"
+                    "location": location.strip(),
+                    "duration": duration,
+                    "stipend": stipend,
+                    "skills": skills
                 }
 
                 save_job(db, job_data, keyword)
@@ -122,4 +165,6 @@ async def scrape_internshala(keyword: str, db: Session, limit: int = 8):
 
         await browser.close()
         gc.collect()
+
+        print(f"Saved {count} internships.")
         return count
